@@ -55,6 +55,7 @@ import (
 	"github.com/Fantom-foundation/go-opera/opera"
 	"github.com/Fantom-foundation/go-opera/utils/signers/gsignercache"
 	"github.com/Fantom-foundation/go-opera/utils/signers/internaltx"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -811,10 +812,10 @@ func (s *PublicBlockChainAPI) calculateExtBlockApi(ctx context.Context, blkNumbe
 }
 
 // GetBlockByNumber returns the requested canonical block.
-// * When blockNr is -1 the chain head is returned.
-// * When blockNr is -2 the pending chain head is returned.
-// * When fullTx is true all transactions in the block are returned, otherwise
-//   only the transaction hash is returned.
+//   - When blockNr is -1 the chain head is returned.
+//   - When blockNr is -2 the pending chain head is returned.
+//   - When fullTx is true all transactions in the block are returned, otherwise
+//     only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	block, err := s.b.BlockByNumber(ctx, number)
 	if block != nil && err == nil {
@@ -2103,10 +2104,18 @@ func (api *PublicDebugAPI) TraceTransaction(ctx context.Context, hash common.Has
 	return api.traceTx(ctx, msg, txctx, vmctx, statedb, config)
 }
 
+var (
+	sem = semaphore.NewWeighted(int64(runtime.NumCPU()))
+)
+
 // traceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
 func (api *PublicDebugAPI) traceTx(ctx context.Context, message evmcore.Message, txctx *tracers.Context, vmctx vm.BlockContext, statedb *state.StateDB, config *TraceConfig) (interface{}, error) {
+	serr := sem.Acquire(ctx, 1)
+	if serr == nil {
+		defer sem.Release(1)
+	}
 	// Assemble the structured logger or the JavaScript tracer
 	var (
 		tracer    vm.Tracer
